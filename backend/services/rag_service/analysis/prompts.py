@@ -273,6 +273,8 @@ EXACT JSON SCHEMA TO FOLLOW:
     "<Specific risk description — cite the clause or its absence>",
     "..."
   ],
+  "risk_score": <Integer from 0 to 100 representing the overall risk severity of this document>,
+  "critical_risks": "<Detailed paragraph explaining the highest risks in this document (e.g. employment bonds, heavy penalties, IP loss, compliance violations). If no major risks, explain why.>",
   "compliance": "<Detailed paragraph: which Indian laws apply, are statutory requirements met, required registrations/filings, any legal gaps or violations found.>"
 }}
 
@@ -345,6 +347,8 @@ def _validate(data: dict, doc_type: str) -> dict:
         "clauses":       to_list(data.get("clauses"),     10),
         "obligations":   to_list(data.get("obligations"),  8),
         "risks":         to_list(data.get("risks"),        6),
+        "risk_score":    int(''.join(filter(str.isdigit, str(data.get("risk_score", "0")))) or 0),
+        "critical_risks": str(data.get("critical_risks", "")).strip()[:800],
         "compliance":    str(data.get("compliance", "")).strip()[:800],
     }
 
@@ -376,6 +380,8 @@ def _extract_from_text(text: str, doc_type: str) -> dict:
         "clauses":       bullet_list("clauses", 10),
         "obligations":   bullet_list("obligations", 8),
         "risks":         bullet_list("risks", 6),
+        "risk_score":    0,
+        "critical_risks": after("critical_risks", 800),
         "compliance":    after("compliance", 600),
     }
 
@@ -396,6 +402,8 @@ def _fallback(reason: str) -> dict:
         "clauses":       [],
         "obligations":   [],
         "risks":         [],
+        "risk_score":    0,
+        "critical_risks": "",
         "compliance":    "",
         "error":         reason,
     }

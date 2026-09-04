@@ -4,6 +4,7 @@ import { Menu, Scale, ChevronRight } from 'lucide-react'
 import { Toaster } from 'react-hot-toast'
 import { useAuthStore } from '../features/auth/models/authStore'
 import { useUIStore } from '../shared/store/uiStore'
+import { useFileStore } from '../features/documents/models/fileStore'
 import Sidebar from './SidebarView'
 import Dashboard from '../features/dashboard/views/DashboardView'
 import DocumentsView from '../features/documents/views/DocumentsView'
@@ -34,6 +35,8 @@ const pageVariants = {
 function TopBar() {
   const { page, setSidebarOpen } = useUIStore()
   const { user } = useAuthStore()
+  const { files, activeDocId } = useFileStore()
+  const activeDoc = activeDocId ? files.find(f => f.doc_id === activeDocId) : null
 
   return (
     <header className="h-16 bg-white/80 dark:bg-black/80 backdrop-blur-md border-b border-gray-200 dark:border-neutral-800 flex items-center justify-between px-4 md:px-6 shrink-0 sticky top-0 z-20 transition-colors duration-300">
@@ -57,6 +60,14 @@ function TopBar() {
           <span className="text-sm font-bold text-gray-900 dark:text-white font-outfit">
             {PAGE_TITLES[page] || page}
           </span>
+          {page === 'documents' && activeDoc && (
+            <>
+              <ChevronRight size={14} className="text-gray-400 dark:text-gray-600 shrink-0" />
+              <span className="text-sm font-semibold text-gray-600 dark:text-gray-400 font-poppins truncate max-w-[150px] sm:max-w-[200px] md:max-w-[300px]" title={activeDoc.filename}>
+                {activeDoc.filename}
+              </span>
+            </>
+          )}
         </div>
       </div>
 

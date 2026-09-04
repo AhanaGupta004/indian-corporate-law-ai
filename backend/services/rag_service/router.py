@@ -108,5 +108,7 @@ def _format_result(result: dict) -> dict:
         "clauses":     result.get("clauses", []),
         "obligations": result.get("obligations", []),
         "risks":       result.get("risks", []),
+        "risk_score":  result.get("risk_score", 0),
+        "critical_risks": result.get("critical_risks", ""),
         "compliance":  result.get("compliance", ""),
     }
