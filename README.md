@@ -600,7 +600,32 @@ This generates `output/faiss_index.bin` and `output/metadata.pkl` — pointed to
 - **CORS**: Configured per environment via `CORS_ORIGINS` in `.env`
 - **Document ownership validation**: All document routes verify the requesting user owns the document
 
----
+----
+
+## 🗺️ Roadmap & Known Limitations
+
+- [ ] Add support for scanned/image-based PDFs via OCR
+- [ ] Multi-document comparison view
+- [ ] Support for additional local LLMs beyond Ollama-hosted models
+- [ ] Dockerize the FAISS knowledge base build step
+- [ ] Add automated tests (pytest for backend, Vitest for frontend)
+- [ ] Pagination for large document lists in the dashboard
+
+## 👥 Contributors
+
+This project was built collaboratively by a team of 6:
+
+| Name | GitHub | Role |
+|---|---|---|
+| Kritik Kaushik |(https://github.com/KritikKaushik/KritikKaushik) 
+| Pankaj Singh Bisht | (https://github.com/PankajSinghBisht018) 
+| Harpreet Singh | (https://github.com/harpreetsingh21-cloud) 
+| Kamakshi Arora | (https://github.com/kamakshi-13) 
+| Lakshya Kansal | (https://github.com/Lakshya1126)
+| ... | ... | ... |
+| ... | ... | ... |
+
+Contributions are welcome — see [Contributing](#-contributing) below.
 
 <div align="center">
 
