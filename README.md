@@ -602,6 +602,17 @@ This generates `output/faiss_index.bin` and `output/metadata.pkl` — pointed to
 
 ---
 
+## 🩺 Troubleshooting
+
+| Issue | Likely Cause | Fix |
+|---|---|---|
+| `Connection refused` on port 11434 | Ollama not running | Run `ollama serve` or check the Ollama tray app is active |
+| Analysis stuck on `PROCESSING` | Backend crashed mid-pipeline | Call `POST /api/documents/reset-stuck` or restart `rag_service` |
+| `MONGODB connection failed` | MongoDB not running locally | Start MongoDB with `mongod` or check `MONGODB_URL` in `.env` |
+| reCAPTCHA not loading | Site key missing/incorrect | Verify `VITE_RECAPTCHA_SITE_KEY` matches your reCAPTCHA admin console |
+| FAISS index not found | Knowledge base not built yet | Run the build script in step 5 of Installation |
+| Upload fails silently | File exceeds 50 MB or wrong type | Only `.pdf`, `.docx`, `.txt` under `MAX_FILE_SIZE_MB` are accepted |
+
 <div align="center">
 
 Built By Kritik Kaushik ,Pankaj Singh Bisht Harpreet Singh and Team
