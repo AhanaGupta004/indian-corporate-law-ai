@@ -604,6 +604,6 @@ This generates `output/faiss_index.bin` and `output/metadata.pkl` — pointed to
 
 <div align="center">
 
-Built By Kritik Kaushik ,Pankaj Singh Bisht And Team
+Built By Kritik Kaushik ,Pankaj Singh Bisht Harpreet Singh and Team
 
 </div>
