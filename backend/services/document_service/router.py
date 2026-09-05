@@ -22,6 +22,10 @@ def _auth(authorization: Optional[str]) -> str:
 
 
 async def _handle_upload(file: UploadFile, authorization: Optional[str]) -> dict:
+    name = file.filename.lower()
+    if not (name.endswith(".pdf") or name.endswith(".doc") or name.endswith(".docx")):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Only PDF and Word (.doc/.docx) files are allowed.")
+        
     user_id = _auth(authorization)
     user = await UserRepository.find_user_by_id(user_id)
     if not user:
@@ -51,6 +55,8 @@ async def _handle_upload(file: UploadFile, authorization: Optional[str]) -> dict
 
     await UserRepository.increment_daily_doc_count(user_id, current_date)
     content = await file.read()
+    if len(content) > 5 * 1024 * 1024:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "File size must be under 5MB.")
     username = user["email"].split("@")[0]
     doc = await service.process_file_upload(user_id, username, file.filename, content)
     logger.info(f"📤  Upload: {file.filename} → doc_id={doc['doc_id']}")
