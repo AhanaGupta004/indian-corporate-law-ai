@@ -16,6 +16,7 @@ export default function App() {
 
   return (
     <>
+    
       <AnimatePresence>
         {!appReady && <PageLoader show message="Initializing…" />}
       </AnimatePresence>
