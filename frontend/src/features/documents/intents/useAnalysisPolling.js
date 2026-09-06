@@ -2,21 +2,40 @@ import { useEffect } from 'react'
 import { useFileStore } from '../models/fileStore'
 import { summarizeAPI } from '../../../shared/utils/api'
 
-export const useAnalysisPolling = (activeDocId, isProcessing) => {
+const PROCESSING_STATUSES = ['queued', 'uploaded', 'processing', 'extracting', 'chunking', 'embedding', 'indexing', 'analyzing']
+
+export const useAnalysisPolling = (activeDocId) => {
   const { setSummary } = useFileStore()
 
   useEffect(() => {
-    if (!isProcessing || !activeDocId) return
+    if (!activeDocId) return
+    let cancelled = false
+    let intervalId = null
 
-    const pollInterval = setInterval(async () => {
+    const fetchOnce = async () => {
       try {
         const res = await summarizeAPI.get(activeDocId)
+        if (cancelled) return
         setSummary(res)
+        const status = String(res?.status || '').toLowerCase()
+        if (PROCESSING_STATUSES.includes(status)) {
+          if (!intervalId) {
+            intervalId = setInterval(fetchOnce, 3000)
+          }
+        } else if (intervalId) {
+          clearInterval(intervalId)
+          intervalId = null
+        }
       } catch (err) {
         console.error('Polling error:', err)
       }
-    }, 3000)
+    }
 
-    return () => clearInterval(pollInterval)
-  }, [isProcessing, activeDocId, setSummary])
+    fetchOnce()
+
+    return () => {
+      cancelled = true
+      if (intervalId) clearInterval(intervalId)
+    }
+  }, [activeDocId, setSummary])
 }
