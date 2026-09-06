@@ -1,467 +1,588 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
-  Upload, FileText, Trash2, Loader2, Brain,
-  BookOpen, AlertTriangle, Shield, CheckCircle2,
-  XCircle, Eye, Sparkles, FolderOpen, Search, ArrowLeft
+ FileText, File, FileType, Trash2, Sparkles, Clock, CheckCircle, Search,
+ LayoutGrid, X, Loader2, Upload, Eye, Brain, BookOpen, Target,
+ ShieldAlert, ShieldCheck, ArrowLeft, CheckCircle2
 } from 'lucide-react'
 import toast from 'react-hot-toast'
-import { useFileStore } from '../models/fileStore'
-import { useAuthStore } from '../../auth/models/authStore'
 import { documentAPI, summarizeAPI } from '../../../shared/utils/api'
-import FileViewer from './FileViewerView'
-import { ContentLoader } from '../../../shared/ui/Loader'
+import { useFileStore } from '../models/fileStore'
+import { useFileUpload } from '../intents/useFileUpload'
+import { useAnalysisPolling } from '../intents/useAnalysisPolling'
+import FileViewerView from './FileViewerView'
 
-const STATUS = {
-  completed:  { cls: 'bg-green-500/10 text-green-500 border-green-500/20', label: 'Ready' },
-  done:       { cls: 'bg-green-500/10 text-green-500 border-green-500/20', label: 'Ready' },
-  processing: { cls: 'bg-orange-500/10 text-orange-500 border-orange-500/20', label: 'Processing' },
-  extracting: { cls: 'bg-orange-500/10 text-orange-500 border-orange-500/20', label: 'Processing' },
-  chunking:   { cls: 'bg-orange-500/10 text-orange-500 border-orange-500/20', label: 'Processing' },
-  embedding:  { cls: 'bg-orange-500/10 text-orange-500 border-orange-500/20', label: 'Processing' },
-  indexing:   { cls: 'bg-orange-500/10 text-orange-500 border-orange-500/20', label: 'Processing' },
-  analyzing:  { cls: 'bg-orange-500/10 text-orange-500 border-orange-500/20', label: 'Processing' },
-  failed:     { cls: 'bg-red-500/10 text-red-500 border-red-500/20', label: 'Failed' },
-  cancelled:  { cls: 'bg-red-500/10 text-red-500 border-red-500/20', label: 'Cancelled' },
-  queued:     { cls: 'bg-amber-500/10 text-amber-500 border-amber-500/20', label: 'Queued' },
-  uploaded:   { cls: 'bg-amber-500/10 text-amber-500 border-amber-500/20', label: 'Queued' },
-}
-
-const TABS = [
-  { id: 'file',        label: 'Preview',     icon: Eye           },
-  { id: 'summary',     label: 'Summary',     icon: Brain         },
-  { id: 'clauses',     label: 'Clauses',     icon: BookOpen      },
-  { id: 'obligations', label: 'Obligations', icon: FileText      },
-  { id: 'risks',       label: 'Risks',       icon: AlertTriangle },
-  { id: 'compliance',  label: 'Compliance',  icon: Shield        },
+const FILTER_TABS = [
+ { id: 'all', label: 'All', icon: LayoutGrid },
+ { id: 'recent', label: 'Recent', icon: Clock },
+ { id: 'analyzed', label: 'Analyzed', icon: CheckCircle },
 ]
 
-function ListSection({ items, theme, emptyMsg }) {
-  if (!items?.length) return (
-    <p className="text-gray-500 dark:text-gray-400 text-sm py-2 font-poppins">
-      {emptyMsg}
-    </p>
-  )
+const DETAIL_TABS = [
+ { id: 'preview',    label: 'PREVIEW' },
+ { id: 'summary',    label: 'SUMMARY',    icon: Brain,       iconBg: 'bg-emerald-500' },
+ { id: 'clauses',    label: 'CLAUSES',    icon: BookOpen,    iconBg: 'bg-blue-500' },
+ { id: 'objectives', label: 'OBJECTIVES', icon: Target,      iconBg: 'bg-orange-500' },
+ { id: 'risk',       label: 'RISK',       icon: ShieldAlert, iconBg: 'bg-rose-500' },
+ { id: 'compliance', label: 'COMPLIANCE', icon: ShieldCheck, iconBg: 'bg-violet-500' },
+]
 
-  const themes = {
-    orange: 'bg-orange-50 dark:bg-orange-500/10 border-orange-200 dark:border-orange-500/20 border-l-orange-500 text-orange-900 dark:text-orange-100',
-    green: 'bg-green-50 dark:bg-green-500/10 border-green-200 dark:border-green-500/20 border-l-green-500 text-green-900 dark:text-green-100',
-    red: 'bg-red-50 dark:bg-red-500/10 border-red-200 dark:border-red-500/20 border-l-red-500 text-red-900 dark:text-red-100',
-  }
+const ANALYSIS_STEPS = [
+ { key: 'chunking',   label: 'Chunking',   statuses: ['QUEUED', 'PROCESSING', 'EXTRACTING', 'CHUNKING'] },
+ { key: 'embedding',  label: 'Embedding',  statuses: ['EMBEDDING'] },
+ { key: 'searching',  label: 'Searching',  statuses: ['INDEXING'] },
+ { key: 'generating', label: 'Generating', statuses: ['ANALYZING'] },
+]
 
-  const activeTheme = themes[theme] || themes.orange;
+const PROCESSING_STATUSES = ['QUEUED', 'PROCESSING', 'EXTRACTING', 'CHUNKING', 'EMBEDDING', 'INDEXING', 'ANALYZING']
 
-  return (
-    <div className="flex flex-col gap-3">
-      {items.map((item, i) => (
-        <motion.div
-          key={i}
-          initial={{ opacity: 0, x: -6 }}
-          animate={{ opacity: 1, x: 0 }}
-          transition={{ delay: i * 0.04 }}
-          className={`p-4 rounded-xl border border-l-[3px] text-sm font-poppins leading-relaxed transition-colors duration-150 ${activeTheme}`}
-        >
-          {item}
-        </motion.div>
-      ))}
-    </div>
-  )
+const isAnalyzed = (s) => ['analyzed', 'done', 'completed'].includes(String(s || '').toLowerCase())
+
+function getStepIndex(status) {
+ const idx = ANALYSIS_STEPS.findIndex(s => s.statuses.includes(status))
+ return idx === -1 ? 0 : idx
 }
 
-function AnalysisContent({ summaryData, activeTab, activeDocId, filename }) {
-  const { setSummary } = useFileStore()
-  const status = (summaryData?.status || '').toLowerCase()
-  const isProcessing = ['processing', 'uploaded', 'queued', 'extracting', 'chunking', 'embedding', 'indexing', 'analyzing'].includes(status)
+function getFileExt(filename) {
+ const m = String(filename || '').match(/\.([^.]+)$/)
+ return m ? m[1].toUpperCase() : ''
+}
 
-  const handleCancel = async () => {
-    try {
-      await summarizeAPI.cancel(activeDocId)
-      setSummary({ ...summaryData, status: 'cancelled' })
-    } catch {}
-  }
+function FileIcon({ ext }) {
+ if (ext === 'PDF') return <FileText size={20} className="text-orange-500" />
+ if (ext === 'DOCX') return <File size={20} className="text-blue-500" />
+ return <FileType size={20} className="text-gray-500 dark:text-gray-400" />
+}
 
-  const handleRetry = async () => {
-    setSummary({ ...summaryData, status: 'queued', error: null })
-    try {
-      await summarizeAPI.trigger(activeDocId)
-    } catch {}
-  }
+function FileTypeBadge({ ext }) {
+ const map = {
+   PDF:  'bg-orange-100 text-orange-800 dark:bg-orange-500/10 dark:text-orange-500',
+   DOCX: 'bg-blue-100 text-blue-800 dark:bg-blue-500/10 dark:text-blue-500',
+   TXT:  'bg-gray-100 text-gray-800 dark:bg-gray-500/10 dark:text-gray-500',
+ }
+ return (
+   <span className={`text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-md ${map[ext] || map.TXT}`}>
+     {ext}
+   </span>
+ )
+}
 
-  useEffect(() => {
-    if (!isProcessing || !activeDocId) return
-    const t = setInterval(async () => {
-      try {
-        const res = await summarizeAPI.get(activeDocId)
-        setSummary(res)
-      } catch (err) {
-        console.error("Analysis polling error:", err)
-      }
-    }, 3000)
-    return () => clearInterval(t)
-  }, [isProcessing, activeDocId, setSummary])
+function BoldText({ text }) {
+ const parts = String(text || '').split(/(\*\*[^*]+\*\*)/g)
+ return (
+   <>
+     {parts.map((part, i) => {
+       if (part.startsWith('**') && part.endsWith('**')) {
+         return <strong key={i} className="text-gray-900 dark:text-white">{part.slice(2, -2)}</strong>
+       }
+       return <span key={i}>{part}</span>
+     })}
+   </>
+ )
+}
 
-  if (activeTab === 'file') return <FileViewer docId={activeDocId} filename={filename} />
+function BulletBlock({ content }) {
+ let lines = []
+ if (Array.isArray(content)) {
+   lines = content.filter(Boolean)
+ } else if (typeof content === 'string') {
+   lines = content.split('\n').map(l => l.trim()).filter(Boolean)
+ }
 
-  if (status === 'failed' || status === 'cancelled') return (
-    <div className="flex flex-col items-center justify-center h-full gap-6 p-8 text-center">
-      <div className={`p-4 rounded-xl border max-w-md ${status === 'cancelled' ? 'bg-orange-50 dark:bg-orange-500/10 border-orange-200 dark:border-orange-500/20 text-orange-900 dark:text-orange-100' : 'bg-red-50 dark:bg-red-500/10 border-red-200 dark:border-red-500/20 text-red-900 dark:text-red-100'}`}>
-        <p className="font-semibold mb-2">{status === 'cancelled' ? 'Analysis Cancelled' : 'Analysis Failed'}</p>
-        <p className="text-sm opacity-90 mb-4">{status === 'cancelled' ? 'You stopped the analysis before it completed.' : (summaryData.error || 'An unexpected error occurred during analysis.')}</p>
-        <button onClick={handleRetry} className={`px-4 py-2 rounded-lg text-sm font-semibold transition-colors ${status === 'cancelled' ? 'bg-orange-500 text-white hover:bg-orange-600' : 'bg-red-500 text-white hover:bg-red-600'}`}>
-          Retry Analysis
-        </button>
-      </div>
-    </div>
-  )
+ if (lines.length === 0) {
+   return <p className="text-gray-500 dark:text-gray-400 text-base leading-relaxed">No items identified.</p>
+ }
 
-  if (isProcessing) return (
-    <div className="flex flex-col items-center justify-center h-full gap-6 p-8 text-center">
-      <div className="relative w-16 h-16">
-        <div className="absolute inset-0 rounded-full border-2 border-gray-200 dark:border-neutral-800" />
-        <motion.div animate={{ rotate: 360 }} transition={{ duration: 1, repeat: Infinity, ease: 'linear' }} className="absolute inset-0 rounded-full border-2 border-transparent border-t-orange-500" />
-        <motion.div animate={{ rotate: -360 }} transition={{ duration: 1.5, repeat: Infinity, ease: 'linear' }} className="absolute top-2 left-2 right-2 bottom-2 rounded-full border-[1.5px] border-transparent border-b-orange-400 opacity-50" />
-        <div className="absolute top-3.5 left-3.5 right-3.5 bottom-3.5 rounded-full bg-orange-500/10 flex items-center justify-center">
-          <Brain size={18} className="text-orange-500" />
-        </div>
-      </div>
-      <div>
-        <div className="font-outfit text-lg font-bold text-gray-900 dark:text-white mb-2">Analyzing document…</div>
-        <div className="text-sm text-gray-500 dark:text-gray-400 leading-relaxed font-poppins">Running RAG pipeline against knowledge base</div>
-      </div>
-      <div className="flex gap-6">
-        {['Chunking', 'Embedding', 'Searching', 'Generating'].map((step, i) => (
-          <div key={step} className="flex flex-col items-center gap-1.5">
-            <motion.div animate={{ scale: [0.8, 1, 0.8], opacity: [0.3, 1, 0.3] }} transition={{ duration: 1.4, delay: i * 0.18, repeat: Infinity, ease: 'easeInOut' }} className="w-1.5 h-1.5 rounded-full bg-orange-500" />
-            <span className="text-xs text-gray-500 dark:text-gray-400 font-medium font-outfit tracking-wide">{step}</span>
-          </div>
-        ))}
-      </div>
-      <button onClick={handleCancel} className="mt-4 px-4 py-2 bg-transparent border border-red-500/30 text-red-500 hover:bg-red-500/10 rounded-lg text-sm font-medium transition-colors">
-        Stop Analysis
-      </button>
-    </div>
-  )
+ const looksLikeBullets = lines.length > 1 || lines[0].startsWith('-') || lines[0].startsWith('*')
 
-  if (summaryData?.status === 'failed') return (
-    <div className="flex flex-col items-center justify-center h-full gap-3">
-      <XCircle size={38} className="text-red-500 opacity-70" />
-      <div className="font-outfit text-base font-bold text-gray-900 dark:text-white">Analysis Failed</div>
-      <div className="text-sm text-gray-500 dark:text-gray-400 font-poppins">Re-upload the document to try again.</div>
-    </div>
-  )
+ if (!looksLikeBullets) {
+   return (
+     <p className="text-gray-700 dark:text-gray-300 text-base leading-relaxed whitespace-pre-wrap">
+       <BoldText text={lines[0]} />
+     </p>
+   )
+ }
 
-  const d = {
-    document_type: summaryData?.document_type || 'Legal Document',
-    summary:       summaryData?.summary       || '',
-    clauses:       summaryData?.clauses       || [],
-    obligations:   summaryData?.obligations   || [],
-    risks:         summaryData?.risks         || [],
-    risk_score:    summaryData?.risk_score    || 0,
-    critical_risks: summaryData?.critical_risks || '',
-    compliance:    summaryData?.compliance    || '',
-  }
+ return (
+   <div className="flex flex-col gap-4">
+     {lines.map((line, i) => {
+       const clean = line.replace(/^[-*]\s*/, '')
+       return (
+         <div key={i} className="text-gray-700 dark:text-gray-300 text-base leading-relaxed">
+           <span className="text-orange-500 mr-2">-</span>
+           <BoldText text={clean} />
+         </div>
+       )
+     })}
+   </div>
+ )
+}
 
-  return (
-    <div className="p-6 md:p-8 overflow-y-auto h-full max-w-5xl mx-auto w-full">
-      <AnimatePresence mode="wait">
-        <motion.div key={activeTab} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} transition={{ duration: 0.22 }}>
-          {activeTab === 'summary' && (
-            <div className="flex flex-col gap-4">
-              <div className="inline-flex items-center gap-2 px-3.5 py-2 rounded-xl bg-orange-500/10 border border-orange-500/20 self-start">
-                <Sparkles size={14} className="text-orange-500" />
-                <span className="text-xs text-orange-500 font-bold font-outfit tracking-wide uppercase">{d.document_type}</span>
-              </div>
-              <p className="text-sm text-gray-800 dark:text-gray-200 leading-loose whitespace-pre-wrap font-poppins">{d.summary || 'No summary available.'}</p>
-            </div>
-          )}
-          {activeTab === 'clauses'      && <ListSection items={d.clauses}      theme="orange" emptyMsg="No clauses identified." />}
-          {activeTab === 'obligations'  && <ListSection items={d.obligations}  theme="green"  emptyMsg="No obligations identified." />}
-          {activeTab === 'risks' && (
-            <div className="flex flex-col gap-6">
-              <div className="flex items-start md:items-center justify-between p-6 rounded-2xl border border-gray-200 dark:border-neutral-800 bg-gray-50/50 dark:bg-neutral-900/30 gap-6 flex-col md:flex-row">
-                <div className="flex-1">
-                  <h3 className="font-outfit text-lg font-semibold text-gray-900 dark:text-white mb-2 flex items-center gap-2">
-                    <AlertTriangle size={18} className={d.risk_score > 70 ? 'text-red-500' : d.risk_score > 30 ? 'text-yellow-500' : 'text-green-500'} />
-                    Risk Assessment
-                  </h3>
-                  <p className="text-sm text-gray-600 dark:text-gray-400 font-poppins leading-relaxed">
-                    {d.critical_risks || 'No critical risks identified in this document.'}
-                  </p>
-                </div>
-                <div className="flex flex-col items-center justify-center shrink-0 w-28">
-                  <div className="relative w-20 h-20 flex items-center justify-center">
-                    <svg className="w-20 h-20 transform -rotate-90">
-                      <circle cx="40" cy="40" r="36" className="stroke-gray-200 dark:stroke-neutral-800 fill-none" strokeWidth="6" />
-                      <circle cx="40" cy="40" r="36" className={`fill-none ${d.risk_score > 70 ? 'stroke-red-500' : d.risk_score > 30 ? 'stroke-yellow-500' : 'stroke-green-500'}`} strokeWidth="6" strokeDasharray="226" strokeDashoffset={226 - (226 * d.risk_score) / 100} strokeLinecap="round" style={{ transition: 'stroke-dashoffset 1s ease-in-out' }} />
-                    </svg>
-                    <div className="absolute inset-0 flex flex-col items-center justify-center">
-                      <span className="text-xl font-bold font-outfit text-gray-900 dark:text-white">{d.risk_score}%</span>
-                    </div>
-                  </div>
-                  <span className="text-[10px] font-semibold uppercase tracking-wider text-gray-500 mt-2">Risk Score</span>
-                </div>
-              </div>
-              <ListSection items={d.risks} theme="red" emptyMsg="No general risks identified." />
-            </div>
-          )}
-          {activeTab === 'compliance'   && (
-            <div className="p-4 rounded-xl bg-blue-50 dark:bg-blue-500/10 border border-blue-200 dark:border-blue-500/20 text-sm text-blue-900 dark:text-blue-100 transition-colors duration-150 leading-relaxed font-poppins border-l-[3px] border-l-blue-500">
-              {d.compliance || 'No compliance information available.'}
-            </div>
-          )}
-        </motion.div>
-      </AnimatePresence>
-    </div>
-  )
+function RiskAssessment({ riskScore, criticalRisks, risks }) {
+ const score = riskScore || 0
+ const scoreColor = score > 70 ? 'text-rose-500' : score > 30 ? 'text-yellow-500' : 'text-green-500'
+ const strokeColor = score > 70 ? 'stroke-rose-500' : score > 30 ? 'stroke-yellow-500' : 'stroke-green-500'
+ const items = Array.isArray(risks) ? risks.filter(Boolean) : []
+
+ return (
+   <DetailCard icon={ShieldAlert} iconBg="bg-rose-500" title="Risk Assessment">
+     <div className="flex flex-col gap-6">
+       <div className="flex items-start md:items-center justify-between p-6 rounded-2xl border border-gray-200/60 dark:border-neutral-800/60 bg-white/60 dark:bg-neutral-900/40 backdrop-blur-md shadow-sm gap-6 flex-col md:flex-row">
+         <div className="flex-1">
+           <p className="text-sm text-gray-600 dark:text-gray-400 leading-relaxed">
+             {criticalRisks || 'No critical risks identified in this document.'}
+           </p>
+         </div>
+         <div className="flex flex-col items-center justify-center shrink-0 w-28">
+           <div className="relative w-20 h-20 flex items-center justify-center">
+             <svg className="w-20 h-20 transform -rotate-90">
+               <circle cx="40" cy="40" r="36" className="stroke-gray-200 dark:stroke-neutral-800 fill-none" strokeWidth="6" />
+               <circle cx="40" cy="40" r="36" className={`fill-none ${strokeColor}`} strokeWidth="6" strokeDasharray="226" strokeDashoffset={226 - (226 * score) / 100} strokeLinecap="round" style={{ transition: 'stroke-dashoffset 1s ease-in-out' }} />
+             </svg>
+             <div className="absolute inset-0 flex flex-col items-center justify-center">
+               <span className={`text-xl font-bold ${scoreColor}`}>{score}%</span>
+             </div>
+           </div>
+           <span className="text-[10px] font-semibold uppercase tracking-wider text-gray-500 mt-2">Risk Score</span>
+         </div>
+       </div>
+
+       {items.length === 0 ? (
+         <p className="text-gray-500 dark:text-gray-400 text-base leading-relaxed">No items identified.</p>
+       ) : (
+         <div className="flex flex-col gap-3">
+           {items.map((item, i) => (
+             <div key={i} className="p-4 rounded-xl border border-rose-200/60 dark:border-rose-500/20 border-l-[3px] border-l-rose-500 bg-rose-50/60 dark:bg-rose-500/10 backdrop-blur-md shadow-sm text-rose-900 dark:text-rose-100 text-sm leading-relaxed">
+               {item}
+             </div>
+           ))}
+         </div>
+       )}
+     </div>
+   </DetailCard>
+ )
+}
+
+function DetailCard({ icon: Icon, iconBg, title, children }) {
+ return (
+   <div className="bg-white dark:bg-[#111111] rounded-3xl border border-gray-200 dark:border-[#1f1f1f] p-8">
+     <div className="flex items-center gap-4 mb-6">
+       <div className={`w-14 h-14 rounded-2xl ${iconBg} flex items-center justify-center text-white shrink-0`}>
+         <Icon size={24} />
+       </div>
+       <h2 className="text-2xl font-black text-gray-900 dark:text-white uppercase tracking-tight">{title}</h2>
+     </div>
+     {children}
+   </div>
+ )
+}
+
+function AnalyzingState({ status, docId, onStopped }) {
+ const [stopping, setStopping] = useState(false)
+ const currentStep = getStepIndex(status)
+
+ const handleStop = async () => {
+   setStopping(true)
+   try {
+     if (documentAPI.cancel) {
+       await documentAPI.cancel(docId)
+     } else if (summarizeAPI.cancel) {
+       await summarizeAPI.cancel(docId)
+     }
+     toast.success('Analysis stopped')
+     if (onStopped) onStopped()
+   } catch (err) {
+     toast.error(err.message || 'Could not stop analysis')
+   } finally {
+     setStopping(false)
+   }
+ }
+
+ return (
+   <div className="flex flex-col items-center py-24 gap-6">
+     <div className="relative w-16 h-16">
+       <div className="absolute inset-0 rounded-full border-2 border-gray-200 dark:border-[#222222]" />
+       <motion.div animate={{ rotate: 360 }} transition={{ duration: 1, repeat: Infinity, ease: 'linear' }} className="absolute inset-0 rounded-full border-2 border-transparent border-t-orange-500" />
+       <div className="absolute inset-0 flex items-center justify-center">
+         <Brain size={20} className="text-orange-500" />
+       </div>
+     </div>
+
+     <div className="text-center">
+       <div className="font-black text-gray-900 dark:text-white text-base uppercase tracking-tight">Analyzing document...</div>
+       <div className="text-gray-500 dark:text-gray-400 text-sm mt-1">Running RAG pipeline against knowledge base</div>
+     </div>
+
+     <div className="flex items-center gap-6">
+       {ANALYSIS_STEPS.map((step, i) => (
+         <div key={step.key} className="flex flex-col items-center gap-2">
+           <div className={`w-2.5 h-2.5 rounded-full transition-colors ${
+             i < currentStep ? 'bg-orange-500' :
+             i === currentStep ? 'bg-orange-500 animate-pulse' :
+             'bg-gray-300 dark:bg-[#2a2a2a]'
+           }`} />
+           <span className={`text-[11px] font-semibold uppercase tracking-wide ${
+             i <= currentStep ? 'text-gray-900 dark:text-white' : 'text-gray-400 dark:text-gray-600'
+           }`}>
+             {step.label}
+           </span>
+         </div>
+       ))}
+     </div>
+
+     <button
+       onClick={handleStop}
+       disabled={stopping}
+       className="text-red-500 border border-red-500/30 hover:bg-red-500/10 px-4 py-2 rounded-lg text-xs font-bold uppercase tracking-wider transition-colors disabled:opacity-50"
+     >
+       {stopping ? 'Stopping...' : 'Stop Analysis'}
+     </button>
+   </div>
+ )
+}
+
+function RiskAnalyzingState({ docId, onStopped }) {
+ const [stopping, setStopping] = useState(false)
+
+ const handleCancel = async () => {
+   setStopping(true)
+   try {
+     if (documentAPI.cancel) {
+       await documentAPI.cancel(docId)
+     } else if (summarizeAPI.cancel) {
+       await summarizeAPI.cancel(docId)
+     }
+     toast.success('Analysis stopped')
+     if (onStopped) onStopped()
+   } catch (err) {
+     toast.error(err.message || 'Could not stop analysis')
+   } finally {
+     setStopping(false)
+   }
+ }
+
+ return (
+   <div className="flex flex-col items-center justify-center py-24 gap-6 p-8 text-center">
+     <div className="relative w-16 h-16">
+       <div className="absolute inset-0 rounded-full border-2 border-gray-200 dark:border-neutral-800" />
+       <motion.div animate={{ rotate: 360 }} transition={{ duration: 1, repeat: Infinity, ease: 'linear' }} className="absolute inset-0 rounded-full border-2 border-transparent border-t-orange-500" />
+       <motion.div animate={{ rotate: -360 }} transition={{ duration: 1.5, repeat: Infinity, ease: 'linear' }} className="absolute top-2 left-2 right-2 bottom-2 rounded-full border-[1.5px] border-transparent border-b-orange-400 opacity-50" />
+       <div className="absolute top-3.5 left-3.5 right-3.5 bottom-3.5 rounded-full bg-orange-500/10 flex items-center justify-center">
+         <Brain size={18} className="text-orange-500" />
+       </div>
+     </div>
+     <div>
+       <div className="font-outfit text-lg font-bold text-gray-900 dark:text-white mb-2">Analyzing document…</div>
+       <div className="text-sm text-gray-500 dark:text-gray-400 leading-relaxed font-poppins">Running RAG pipeline against knowledge base</div>
+     </div>
+     <div className="flex gap-6">
+       {['Chunking', 'Embedding', 'Searching', 'Generating'].map((step, i) => (
+         <div key={step} className="flex flex-col items-center gap-1.5">
+           <motion.div animate={{ scale: [0.8, 1, 0.8], opacity: [0.3, 1, 0.3] }} transition={{ duration: 1.4, delay: i * 0.18, repeat: Infinity, ease: 'easeInOut' }} className="w-1.5 h-1.5 rounded-full bg-orange-500" />
+           <span className="text-xs text-gray-500 dark:text-gray-400 font-medium font-outfit tracking-wide">{step}</span>
+         </div>
+       ))}
+     </div>
+     <button onClick={handleCancel} disabled={stopping} className="mt-4 px-4 py-2 bg-transparent border border-red-500/30 text-red-500 hover:bg-red-500/10 rounded-lg text-sm font-medium transition-colors disabled:opacity-50">
+       {stopping ? 'Stopping...' : 'Stop Analysis'}
+     </button>
+   </div>
+ )
 }
 
 export default function DocumentsView() {
-  const { files, setFiles, activeDocId, summaryData, setActive, setSummary, clearActive } = useFileStore()
-  const { incrementDocCount } = useAuthStore()
-  const [activeTab, setActiveTab] = useState('file')
-  const [uploading, setUploading] = useState(false)
-  const [loading, setLoading]     = useState(false)
-  const [searchQuery, setSearchQuery] = useState('')
-  const [dragging, setDragging] = useState(false)
-  const [uploadHovered, setUploadHovered] = useState(false)
-  const inputRef = useRef(null)
+ const {
+   files, activeDocId, activeDoc, setActiveDoc,
+   refreshFiles, clearActive, summaryData, analyzing, setAnalyzing
+ } = useFileStore()
+ const { dragging, setDragging, inputRef, handleFile, onDrop } = useFileUpload()
+ const [filterTab, setFilterTab] = useState('all')
+ const [detailTab, setDetailTab] = useState('preview')
+ const [searchQuery, setSearchQuery] = useState('')
+ const [loading, setLoading] = useState(false)
+ const [deleting, setDeleting] = useState(null)
 
-  const fetchFiles = async () => {
-    try { const r = await documentAPI.list(); setFiles(r.documents || []) } catch {}
-  }
+ useAnalysisPolling(activeDocId)
 
-  useEffect(() => { 
-    setLoading(true)
-    fetchFiles().finally(() => setLoading(false))
-  }, [])
+ useEffect(() => {
+   setLoading(true)
+   refreshFiles().finally(() => setLoading(false))
+ }, [])
 
-  const hasProcessingFiles = files.some((f) => ['processing', 'uploaded', 'queued', 'extracting', 'chunking', 'embedding', 'indexing', 'analyzing'].includes((f.status || '').toLowerCase()))
-  useEffect(() => {
-    if (!hasProcessingFiles) return
-    const t = setInterval(fetchFiles, 4000)
-    return () => clearInterval(t)
-  }, [hasProcessingFiles])
+ const hasProcessingFiles = files.some((f) => PROCESSING_STATUSES.includes(String(f.status || '').toUpperCase()))
+ useEffect(() => {
+   if (!hasProcessingFiles) return
+   const t = setInterval(() => { refreshFiles() }, 4000)
+   return () => clearInterval(t)
+ }, [hasProcessingFiles])
 
-  const handleSelect = async (doc) => {
-    setActive(doc.doc_id, { status: doc.status, filename: doc.filename, doc_id: doc.doc_id })
-    setActiveTab('summary')
-    const st = (doc.status || '').toLowerCase()
-    const processingStates = ['processing', 'extracting', 'chunking', 'embedding', 'indexing', 'analyzing']
-    if (st === 'done' || st === 'completed') {
-      try { 
-        const res = await summarizeAPI.get(doc.doc_id); 
-        setSummary(res); 
-      } catch (err) { 
-        console.error("Summary fetch error:", err);
-        toast.error("Failed to load summary: " + err.message);
-      }
-    } else if (st === 'uploaded' || st === 'queued') {
-      try { await summarizeAPI.trigger(doc.doc_id) } catch {}
-      setSummary({ status: 'processing', filename: doc.filename, doc_id: doc.doc_id })
-    } else if (processingStates.includes(st)) {
-      setSummary({ status: st, filename: doc.filename, doc_id: doc.doc_id })
-    }
-  }
+ useEffect(() => {
+   setDetailTab('preview')
+ }, [activeDocId])
 
-  const handleDrop = (e) => {
-    e.preventDefault(); setDragging(false)
-    if (e.dataTransfer.files && e.dataTransfer.files[0]) handleUpload(e.dataTransfer.files[0])
-  }
+ const validFiles = files.filter(d => d.doc_id && String(d.doc_id).trim() !== '')
 
-  const handleUpload = async (file) => {
-    if (!file) return
-    const name = file.name.toLowerCase()
-    if (!name.endsWith('.pdf') && !name.endsWith('.doc') && !name.endsWith('.docx')) {
-      toast.error('Only PDF and Word (.doc/.docx) files are allowed.')
-      return
-    }
-    if (file.size > 5 * 1024 * 1024) {
-      toast.error('File size must be under 5MB.')
-      return
-    }
-    setUploading(true)
-    const tid = toast.loading(`Uploading ${file.name}…`)
-    try {
-      const res = await documentAPI.upload(file)
-      toast.success('Uploaded — analyzing…', { id: tid })
-      try { await summarizeAPI.trigger(res.doc_id) } catch {}
-      setActive(res.doc_id, { status: 'processing', filename: res.filename, doc_id: res.doc_id })
-      setActiveTab('summary')
-      incrementDocCount()
-      await fetchFiles()
-    } catch (err) {
-      toast.error(err.message.replace(/^\d+:\s*/, '').slice(0, 80), { id: tid })
-    } finally { setUploading(false) }
-  }
+ const filteredFiles = validFiles.filter((doc) => {
+   if (filterTab === 'analyzed') return isAnalyzed(doc.status)
+   return true
+ }).filter((doc) =>
+   doc.filename.toLowerCase().includes(searchQuery.toLowerCase())
+ )
 
-  const handleDelete = async (e, docId) => {
-    e.stopPropagation()
-    if (!confirm('Delete this document?')) return
-    try {
-      await documentAPI.delete(docId)
-      if (activeDocId === docId) clearActive()
-      await fetchFiles()
-      toast.success('Deleted')
-    } catch {
-      toast.error('Delete failed')
-    }
-  }
+ const displayFiles = filterTab === 'recent'
+   ? [...filteredFiles].reverse().slice(0, 6)
+   : filteredFiles
 
-  const activeDoc = files.find((f) => f.doc_id === activeDocId)
-  const filteredFiles = files.filter(f => f.filename.toLowerCase().includes(searchQuery.toLowerCase()))
+ const handleDelete = async (e, doc) => {
+   e.stopPropagation()
+   if (!confirm(`Delete "${doc.filename}"?`)) return
+   setDeleting(doc.doc_id)
+   try {
+     await documentAPI.delete(doc.doc_id)
+     toast.success('Deleted')
+     await refreshFiles()
+     if (activeDocId === doc.doc_id) clearActive()
+   } catch (err) {
+     toast.error(err.message)
+   } finally {
+     setDeleting(null)
+   }
+ }
 
-  return (
-    <div className="flex h-[calc(100vh-58px)] bg-transparent overflow-hidden flex-col md:flex-row transition-colors duration-300 relative">
-      
-      {/* Explicitly adding Orbs here so they show perfectly through the transparent background */}
-      <div className="absolute rounded-full pointer-events-none blur-[80px] bg-orange-500 w-[500px] h-[500px] -top-[15%] -right-[8%] opacity-5 z-0" />
-      <div className="absolute rounded-full pointer-events-none blur-[80px] bg-orange-500 w-[350px] h-[350px] -bottom-[20%] left-[15%] opacity-5 z-0" />
+ const handleAnalyze = async (e, doc) => {
+   e.stopPropagation()
+   setAnalyzing(true)
+   const tid = toast.loading(`Analyzing ${doc.filename}...`)
+   try {
+     await summarizeAPI.trigger(doc.doc_id)
+     toast.success('Analysis started!', { id: tid })
+     await refreshFiles()
+   } catch (err) {
+     toast.error(err.message, { id: tid })
+   }
+ }
 
-      <AnimatePresence mode="wait">
-        {!activeDocId ? (
-          <motion.div key="dashboard" initial={{ opacity: 0, scale: 0.98 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.98 }} transition={{ duration: 0.2 }} className="w-full h-full overflow-y-auto p-4 md:p-10 relative z-10">
-            <div className="max-w-5xl mx-auto">
-              
-              {/* Header */}
-              <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-8 gap-4">
-                <h1 className="text-2xl font-bold text-gray-900 dark:text-white font-outfit tracking-tight">Documents</h1>
-                <div className="flex items-center gap-2.5 bg-white/80 dark:bg-neutral-900/80 backdrop-blur-md border border-gray-200 dark:border-neutral-800 px-4 py-2.5 rounded-xl w-full md:w-80 transition-colors duration-200 focus-within:border-orange-500 focus-within:ring-2 focus-within:ring-orange-500/20 shadow-sm">
-                  <Search size={18} className="text-gray-400 dark:text-gray-500" />
-                  <input type="text" placeholder="Search documents..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} className="flex-1 bg-transparent border-none text-gray-900 dark:text-white outline-none text-sm font-poppins" />
-                </div>
-              </div>
+ const activeDocMeta = files.find((f) => f.doc_id === activeDocId)
+ const currentStatus = summaryData?.status || activeDocMeta?.status
+ const docStatusReady = isAnalyzed(currentStatus)
+ const isProcessing = analyzing || PROCESSING_STATUSES.includes(currentStatus)
 
-              {/* Dropzone */}
-              <div
-                className={`p-12 rounded-3xl flex flex-col items-center justify-center gap-4 mb-10 transition-all duration-200 border-2 border-dashed backdrop-blur-sm ${uploading ? 'cursor-not-allowed' : 'cursor-pointer'} ${dragging || uploadHovered ? 'border-orange-500 bg-orange-500/10' : 'border-gray-300 dark:border-neutral-700 bg-white/60 dark:bg-neutral-900/60'}`}
-                onMouseEnter={() => setUploadHovered(true)} onMouseLeave={() => setUploadHovered(false)}
-                onDragOver={(e) => { e.preventDefault(); setDragging(true) }} onDragLeave={() => setDragging(false)}
-                onDrop={handleDrop} onClick={() => !uploading && inputRef.current?.click()}
-              >
-                <input ref={inputRef} type="file" accept=".pdf,.doc,.docx" className="hidden" onChange={(e) => { if (e.target.files?.[0]) handleUpload(e.target.files[0]) }} disabled={uploading} />
-                {uploading ? (
-                  <div className="flex flex-col items-center gap-3">
-                    <Loader2 size={32} className="animate-spin text-orange-500" />
-                    <span className="text-sm text-gray-500 dark:text-gray-400 font-poppins">Uploading document...</span>
-                  </div>
-                ) : (
-                  <>
-                    <div className={`w-16 h-16 rounded-full bg-white dark:bg-neutral-900 border border-gray-200 dark:border-neutral-800 shadow-sm flex items-center justify-center transition-transform duration-200 ${uploadHovered ? '-translate-y-1' : ''}`}>
-                      <Upload size={28} className={uploadHovered ? 'text-orange-500' : 'text-gray-400 dark:text-gray-500'} />
-                    </div>
-                    <div className="text-center mt-2">
-                      <p className="text-base font-semibold text-gray-900 dark:text-white mb-1.5 font-outfit">Click to upload or drag and drop</p>
-                      <p className="text-sm text-gray-500 dark:text-gray-400 font-poppins">PDF, DOCX, or TXT files supported</p>
-                    </div>
-                  </>
-                )}
-              </div>
+ return (
+   <div className="flex h-[calc(100vh-58px)] bg-gray-50 dark:bg-[#050505] overflow-hidden flex-col text-gray-900 dark:text-white transition-colors duration-300">
+     <AnimatePresence mode="wait">
+       {!activeDocId ? (
+         <motion.div
+           key="library"
+           initial={{ opacity: 0 }}
+           animate={{ opacity: 1 }}
+           exit={{ opacity: 0 }}
+           transition={{ duration: 0.2 }}
+           className="w-full h-full overflow-y-auto p-6 md:p-8"
+         >
+           <div className="max-w-6xl mx-auto space-y-6">
+             <div className="flex items-center justify-between gap-3 flex-wrap">
+               <h1 className="text-2xl font-black text-gray-900 dark:text-white flex items-center gap-2">
+                 <FileText className="w-5 h-5 text-orange-500" />
+                 Documents
+               </h1>
+               <div className="relative">
+                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 dark:text-gray-500" />
+                 <input
+                   type="text"
+                   placeholder="Search..."
+                   value={searchQuery}
+                   onChange={(e) => setSearchQuery(e.target.value)}
+                   className="pl-9 pr-4 py-2 rounded-xl text-sm bg-white dark:bg-[#161616] border border-gray-200 dark:border-[#1f1f1f] text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-600 focus:outline-none focus:border-orange-500 w-56"
+                 />
+               </div>
+             </div>
 
-              {/* Files List */}
-              <div className="flex items-center gap-2.5 mb-5">
-                <FolderOpen size={18} className="text-gray-400 dark:text-gray-500" />
-                <h3 className="text-base font-semibold text-gray-900 dark:text-white font-outfit">Recent Files {filteredFiles.length > 0 && `(${filteredFiles.length})`}</h3>
-              </div>
+             <div
+               onDragOver={(e) => { e.preventDefault(); setDragging(true) }}
+               onDragLeave={() => setDragging(false)}
+               onDrop={onDrop}
+               onClick={() => inputRef.current?.click()}
+               className={`cursor-pointer rounded-2xl border-2 border-dashed p-6 text-center transition-all ${
+                 dragging ? 'border-orange-500 bg-orange-500/5' : 'border-gray-300 dark:border-[#2a2a2a] bg-white dark:bg-[#0d0d0d] hover:border-orange-400'
+               }`}
+             >
+               <input ref={inputRef} type="file" accept=".pdf,.docx,.txt" className="hidden" onChange={(e) => handleFile(e.target.files[0])} />
+               <div className="flex items-center justify-center gap-3">
+                 <Upload className="w-5 h-5 text-orange-500" />
+                 <span className="text-sm font-semibold text-gray-900 dark:text-white">Drop file or click to upload</span>
+                 <span className="text-xs text-gray-500 dark:text-gray-400">PDF, DOCX, TXT</span>
+               </div>
+             </div>
 
-              {loading ? (
-                <ContentLoader rows={3} />
-              ) : filteredFiles.length === 0 ? (
-                <div className="text-center p-12 bg-white/60 dark:bg-neutral-900/60 backdrop-blur-sm rounded-2xl border border-gray-200 dark:border-neutral-800">
-                  <p className="text-gray-500 dark:text-gray-400 text-sm font-poppins">{searchQuery ? "No documents match your search." : "No documents uploaded yet."}</p>
-                </div>
-              ) : (
-                <div className="grid grid-cols-1 md:grid-cols-[repeat(auto-fill,minmax(320px,1fr))] gap-4">
-                  <AnimatePresence>
-                    {filteredFiles.map((doc, i) => {
-                      const docStatus = (doc.status || '').toLowerCase()
-                      const s = STATUS[docStatus] || STATUS.queued
-                      const name = doc.filename.replace(/\.[^.]+$/, '')
-                      return (
-                        <motion.div
-                          key={doc.doc_id} layout initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, scale: 0.9 }} transition={{ delay: i * 0.05 }}
-                          onClick={() => handleSelect(doc)}
-                          className="p-4 bg-white/80 dark:bg-neutral-900/80 backdrop-blur-sm rounded-2xl border border-gray-200 dark:border-neutral-800 cursor-pointer flex items-start gap-4 transition-all duration-200 hover:border-orange-400 hover:shadow-md hover:-translate-y-0.5 relative overflow-hidden group"
-                        >
-                          <div className="absolute left-0 top-3 bottom-3 w-1 bg-orange-500 rounded-r-md opacity-0 transition-opacity duration-150 group-hover:opacity-100" />
-                          <div className="w-11 h-11 rounded-xl bg-gray-50 dark:bg-neutral-950 border border-gray-200 dark:border-neutral-800 shadow-sm flex items-center justify-center shrink-0">
-                            <FileText size={18} className="text-gray-400 dark:text-gray-500" />
-                          </div>
-                          <div className="flex-1 min-w-0">
-                            <div className="text-sm font-semibold text-gray-900 dark:text-white whitespace-nowrap overflow-hidden text-ellipsis mb-2.5 font-outfit" title={doc.filename}>{name}</div>
-                            <div className="flex items-center justify-between">
-                              <div className="flex items-center gap-2">
-                                <span className={`inline-flex items-center px-2.5 py-0.5 rounded-md text-[10px] font-bold tracking-wider uppercase font-outfit border ${s.cls}`}>{s.label}</span>
-                                <span className="inline-flex items-center px-2 py-0.5 rounded-md text-[9px] font-bold tracking-wider uppercase font-outfit border border-gray-200 dark:border-neutral-700 bg-gray-100 dark:bg-neutral-800 text-gray-500 dark:text-gray-400">
-                                  {doc.filename.split('.').pop()}
-                                </span>
-                              </div>
-                              <button
-                                onClick={(e) => handleDelete(e, doc.doc_id)}
-                                className="bg-transparent border-none cursor-pointer text-gray-400 dark:text-gray-500 p-1.5 opacity-0 transition-all duration-200 rounded-md hover:text-red-500 hover:bg-red-500/10 group-hover:opacity-100"
-                              >
-                                <Trash2 size={14} />
-                              </button>
-                            </div>
-                          </div>
-                        </motion.div>
-                      )
-                    })}
-                  </AnimatePresence>
-                </div>
-              )}
-            </div>
-          </motion.div>
-        ) : (
-          
-          /* ── Detail Analysis View ── */
-          <motion.div key="analysis" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }} transition={{ duration: 0.25, ease: "easeOut" }} className="w-full h-full flex flex-col relative z-10">
-            
-            {/* Header & Tabs */}
-            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 py-3 px-6 border-b border-gray-200 dark:border-neutral-800 bg-transparent backdrop-blur-md shrink-0">
-              {/* Left Side: Back Button */}
-              <div className="flex items-center">
-                <button
-                  onClick={() => clearActive()}
-                  className="flex items-center gap-1.5 bg-transparent border-none text-gray-500 dark:text-gray-400 cursor-pointer text-xs font-medium py-1.5 px-2.5 rounded-lg transition-colors duration-200 font-poppins hover:bg-gray-200 dark:hover:bg-neutral-800 hover:text-gray-900 dark:hover:text-white"
-                >
-                  <ArrowLeft size={16} /> Back
-                </button>
-              </div>
+             <div className="flex items-center gap-1 bg-gray-100 dark:bg-[#111111] p-1 rounded-xl w-fit border border-gray-200 dark:border-[#1f1f1f]">
+               {FILTER_TABS.map((tab) => (
+                 <button
+                   key={tab.id}
+                   onClick={() => setFilterTab(tab.id)}
+                   className={`px-4 py-2 rounded-lg text-xs font-semibold transition-all flex items-center gap-1.5 ${
+                     filterTab === tab.id ? 'bg-orange-500 text-white' : 'text-gray-500 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white'
+                   }`}
+                 >
+                   <tab.icon size={14} /> {tab.label}
+                 </button>
+               ))}
+             </div>
 
-              {/* Right Side: Tabs */}
-              <div className="flex gap-2 items-center overflow-x-auto hide-scrollbar">
-                {TABS.map(({ id, label, icon: Icon }) => (
-                  <button
-                    key={id} onClick={() => setActiveTab(id)}
-                    className={`px-4 py-2 rounded-full text-xs font-semibold cursor-pointer transition-all duration-150 border whitespace-nowrap font-outfit flex items-center gap-2 tracking-wide ${
-                      activeTab === id 
-                      ? 'bg-orange-500 text-white shadow-md shadow-orange-500/30 border-transparent' 
-                      : 'text-gray-500 dark:text-gray-400 bg-transparent border-transparent hover:text-gray-900 dark:hover:text-white hover:bg-gray-100 dark:hover:bg-neutral-900'
-                    }`}
-                  >
-                    <Icon size={14} />{label}
-                  </button>
-                ))}
-                
-                {['done', 'completed'].includes((summaryData?.status || '').toLowerCase()) && (
-                  <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="ml-1">
-                    <div className="flex items-center gap-2 py-1 px-3 rounded-full bg-green-500/10 border border-green-500/20">
-                      <CheckCircle2 size={12} className="text-green-500" />
-                      <span className="text-[11px] text-green-500 font-semibold font-poppins tracking-wide uppercase">Analysis Ready</span>
-                    </div>
-                  </motion.div>
-                )}
-              </div>
-            </div>
+             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+               {loading ? (
+                 [1, 2, 3].map(i => (
+                   <div key={i} className="bg-gray-100 dark:bg-[#161616] rounded-2xl p-6 border border-gray-200 dark:border-[#1f1f1f] h-40 animate-pulse" />
+                 ))
+               ) : displayFiles.length === 0 ? (
+                 <div className="col-span-full text-center py-12 bg-white dark:bg-[#111111] rounded-2xl border border-gray-200 dark:border-[#1f1f1f]">
+                   <p className="text-gray-500 dark:text-gray-400 text-sm">{searchQuery ? 'No documents match your search.' : 'No documents uploaded yet.'}</p>
+                 </div>
+               ) : (
+                 <AnimatePresence>
+                   {displayFiles.map((doc, i) => {
+                     const ext = getFileExt(doc.filename)
+                     return (
+                       <motion.div
+                         key={doc.doc_id}
+                         layout
+                         initial={{ opacity: 0, y: 10 }}
+                         animate={{ opacity: 1, y: 0 }}
+                         exit={{ opacity: 0, scale: 0.95 }}
+                         transition={{ delay: i * 0.03 }}
+                         onClick={() => setActiveDoc(doc.doc_id, doc)}
+                         className="bg-white dark:bg-[#161616] rounded-2xl p-6 border border-gray-200 dark:border-[#1f1f1f] hover:border-orange-500/40 transition-colors cursor-pointer group relative"
+                       >
+                         <div className="flex items-start justify-between mb-3">
+                           <div className="w-10 h-10 rounded-xl bg-orange-500/10 border border-orange-500/20 flex items-center justify-center">
+                             <FileIcon ext={ext} />
+                           </div>
+                           <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                             {!isAnalyzed(doc.status) && (
+                               <button onClick={(e) => handleAnalyze(e, doc)} className="p-1.5 rounded-lg bg-orange-500/10 text-orange-500 hover:bg-orange-500/20" title="Analyze">
+                                 <Sparkles size={14} />
+                               </button>
+                             )}
+                             <button onClick={(e) => handleDelete(e, doc)} disabled={deleting === doc.doc_id} className="p-1.5 rounded-lg bg-red-500/10 text-red-500 hover:bg-red-500/20" title="Delete">
+                               {deleting === doc.doc_id ? <Loader2 size={14} className="animate-spin" /> : <Trash2 size={14} />}
+                             </button>
+                           </div>
+                         </div>
+                         <div className="text-gray-900 dark:text-white font-bold text-base truncate" title={doc.filename}>
+                           {doc.filename.replace(/\.[^.]+$/, '')}
+                         </div>
+                         <div className="flex items-center gap-2 mt-3">
+                           <FileTypeBadge ext={ext} />
+                           <span className={`text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-md flex items-center gap-1 ${
+                             isAnalyzed(doc.status) ? 'bg-green-500/10 text-green-600 dark:text-green-500' : 'bg-yellow-500/10 text-yellow-600 dark:text-yellow-500'
+                           }`}>
+                             {isAnalyzed(doc.status) ? <CheckCircle size={11} /> : <Clock size={11} />}
+                             {isAnalyzed(doc.status) ? 'Analyzed' : 'Queued'}
+                           </span>
+                         </div>
+                       </motion.div>
+                     )
+                   })}
+                 </AnimatePresence>
+               )}
+             </div>
+           </div>
+         </motion.div>
+       ) : (
+         <motion.div
+           key="detail"
+           initial={{ opacity: 0, x: 20 }}
+           animate={{ opacity: 1, x: 0 }}
+           exit={{ opacity: 0, x: -20 }}
+           transition={{ duration: 0.2 }}
+           className="w-full h-full flex flex-col bg-gray-50 dark:bg-[#050505]"
+         >
+           <div className="flex items-center justify-between py-4 px-6 border-b border-gray-200 dark:border-[#1a1a1a] shrink-0 gap-4 flex-wrap">
+             <button onClick={clearActive} className="shrink-0 flex items-center gap-2 text-gray-500 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white text-sm font-medium">
+               <ArrowLeft size={16} /> Back
+             </button>
+             <div className="flex items-center bg-gray-100 dark:bg-[#111111] rounded-full p-1 border border-gray-200 dark:border-[#1f1f1f] overflow-x-auto flex-nowrap">
+               {DETAIL_TABS.map((tab) => {
+                 const active = detailTab === tab.id
+                 return (
+                   <button
+                     key={tab.id}
+                     onClick={() => setDetailTab(tab.id)}
+                     className={`shrink-0 whitespace-nowrap px-3 py-2 md:px-5 rounded-full text-[11px] md:text-xs font-bold uppercase tracking-wider transition-all ${
+                       active ? 'bg-white dark:bg-[#1f1f1f] text-orange-500 shadow-sm' : 'text-gray-500 dark:text-gray-500 hover:text-gray-900 dark:hover:text-gray-300'
+                     }`}
+                   >
+                     {tab.label}
+                   </button>
+                 )
+               })}
+             </div>
+           </div>
 
-            {/* Content Area */}
-            <div className="flex-1 overflow-hidden bg-transparent relative">
-              <AnalysisContent summaryData={summaryData} activeTab={activeTab} activeDocId={activeDocId} filename={activeDoc?.filename} />
-            </div>
-            
-          </motion.div>
-        )}
-      </AnimatePresence>
-    </div>
-  )
+           <div className="flex items-center justify-between px-6 py-3 border-b border-gray-200 dark:border-[#1a1a1a] shrink-0">
+             <div className="flex items-center gap-2.5 min-w-0">
+               <FileText size={16} className="text-orange-500 shrink-0" />
+               <span className="text-sm font-semibold text-gray-900 dark:text-white truncate">{activeDoc?.filename}</span>
+             </div>
+             {docStatusReady && (
+               <div className="shrink-0 flex items-center gap-2 py-1 px-3 rounded-full bg-green-500/10 border border-green-500/20">
+                 <CheckCircle2 size={12} className="text-green-600 dark:text-green-500" />
+                 <span className="text-[11px] text-green-600 dark:text-green-500 font-bold uppercase tracking-wider">Analysis Ready</span>
+               </div>
+             )}
+           </div>
+
+           <div className="flex-1 overflow-y-auto px-6 py-6">
+             {detailTab === 'preview' && (
+               <div className="h-[calc(100vh-220px)]">
+                 <FileViewerView docId={activeDocId} filename={activeDoc?.filename} onClose={clearActive} />
+               </div>
+             )}
+
+             {detailTab !== 'preview' && detailTab !== 'risk' && isProcessing && !docStatusReady && (
+               <AnalyzingState status={currentStatus} docId={activeDocId} onStopped={() => { setAnalyzing(false); refreshFiles() }} />
+             )}
+
+             {detailTab === 'risk' && isProcessing && !docStatusReady && (
+               <RiskAnalyzingState docId={activeDocId} onStopped={() => { setAnalyzing(false); refreshFiles() }} />
+             )}
+
+             {detailTab !== 'preview' && !docStatusReady && !isProcessing && (
+               <div className="text-center py-24 text-gray-500 dark:text-gray-400 text-sm">
+                 No analysis yet. Go back and click the sparkles icon to start.
+               </div>
+             )}
+
+             {detailTab === 'summary' && docStatusReady && (
+               <DetailCard icon={Brain} iconBg="bg-emerald-500" title="Executive Summary">
+                 <BulletBlock content={summaryData?.summary} />
+               </DetailCard>
+             )}
+
+             {detailTab === 'clauses' && docStatusReady && (
+               <DetailCard icon={BookOpen} iconBg="bg-blue-500" title="Detected Clauses">
+                 <BulletBlock content={summaryData?.clauses} />
+               </DetailCard>
+             )}
+
+             {detailTab === 'objectives' && docStatusReady && (
+               <DetailCard icon={Target} iconBg="bg-orange-500" title="Legal Objectives">
+                 <BulletBlock content={summaryData?.obligations} />
+               </DetailCard>
+             )}
+
+             {detailTab === 'risk' && docStatusReady && (
+               <RiskAssessment riskScore={summaryData?.risk_score} criticalRisks={summaryData?.critical_risks} risks={summaryData?.risks} />
+             )}
+
+             {detailTab === 'compliance' && docStatusReady && (
+               <DetailCard icon={ShieldCheck} iconBg="bg-violet-500" title="Compliance Status">
+                 <BulletBlock content={summaryData?.compliance} />
+               </DetailCard>
+             )}
+           </div>
+         </motion.div>
+       )}
+     </AnimatePresence>
+   </div>
+ )
 }

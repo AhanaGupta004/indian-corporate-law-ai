@@ -238,7 +238,8 @@ legalbuddy/
 │   │
 │   ├── venv/                            # Python virtual environment
 │   ├── requirements.txt                 # All Python dependencies
-│   └── run_dev.py                       # Dev script: starts all 4 services (Windows/Mac/Linux)
+│   ├── run_dev.py                       # Dev script: starts all 4 services (Windows/Mac/Linux)
+│   └── run_all.py                       # Dev script: starts all 4 services in a single terminal
 │
 ├── docker-compose.yml                   # Start all 4 services with one command
 └── .env                                 # Shared environment variables
@@ -500,6 +501,19 @@ npm run dev
 
 The frontend will start at `http://localhost:5173`.
 
+### 3.5 Alternative: Single-Terminal Dev Script
+
+Instead of running each service manually, `run_all.py` starts the Auth, Document, RAG, and API Gateway services together as subprocesses of a single Python process — all four ports (`8001`, `8002`, `8003`, `5000`) come up from **one VS Code terminal window**, with their logs interleaved in that same window rather than spread across separate popped-up terminals.
+
+```bash
+cd backend
+python run_all.py
+```
+
+This always launches the services using the project's own virtual environment interpreter (`backend/venv`), regardless of which Python is active on your system `PATH`, so it stays consistent across machines. Press `Ctrl+C` in that terminal to stop all four services at once.
+
+> Use `run_dev.py` instead if you'd rather have each service in its own separate terminal window.
+
 ### 4. Ollama Setup (Local LLM)
 
 ```bash
@@ -604,6 +618,6 @@ This generates `output/faiss_index.bin` and `output/metadata.pkl` — pointed to
 
 <div align="center">
 
-Built By Kritik Kaushik ,Pankaj Singh Bisht Harpreet Singh and Team
+Built By Kritik Kaushik ,Pankaj Singh Bisht, Harpreet Singh , Kamakshi Arora , Lakshya Kansal and Team
 
 </div>
