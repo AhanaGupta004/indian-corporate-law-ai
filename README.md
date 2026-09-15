@@ -655,6 +655,6 @@ Contributions are welcome — see [Contributing](#-contributing) below.
 
 <div align="center">
 
-Built By Kritik Kaushik ,Pankaj Singh Bisht, Harpreet Singh , Kamakshi Arora , Lakshya Kansal and Team
+Built By Kritik Kaushik ,Pankaj Singh Bisht, Harpreet Singh , Kamakshi Arora , Lakshya Kansal and Ahana Gupta
 
 </div>
